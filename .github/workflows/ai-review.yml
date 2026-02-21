@@ -2,7 +2,11 @@ name: AI Code Review
 
 on:
   push:
-    branches: [ main ]
+    branches-ignore:
+      - main
+  pull_request:
+    branches:
+      - main
 
 jobs:
   review:
@@ -26,7 +30,7 @@ jobs:
 
           RESPONSE=$(curl -s https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/text-generation/generation \
             -H "Content-Type: application/json" \
-            -H "Authorization: Bearer ${{ secrets.DEEPSEEK_API_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.QWEN_API_KEY }}" \
             -d "{
               \"model\": \"qwen-plus\",
               \"input\": {
