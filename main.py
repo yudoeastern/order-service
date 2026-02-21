@@ -50,7 +50,7 @@ products = [
     {"id": "prod5", "name": "Tablet", "category": "Electronics", "price": 400.00},
     {"id": "prod6", "name": "Headphones", "category": "Electronics", "price": 100.00},
     {"id": "prod7", "name": "Smartphone", "category": "Electronics", "price": 800.00},
-    {"id": "prod8", "name": "Speaker", "category": "Electronics", "price": 150.00
+    {"id": "prod8", "name": "Speaker", "category": "Electronics", "price": 150.00}
 ]
 
 # Initialize with some mock data
