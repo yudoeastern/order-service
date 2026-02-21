@@ -1,18 +1,21 @@
 import pytest
 from fastapi.testclient import TestClient
-from main import app, orders_db
+from main import app
 from datetime import datetime
 
-# Create a test client
-client = TestClient(app)
+@pytest.fixture
+def client():
+    """Create a test client for testing"""
+    with TestClient(app) as client:
+        yield client
 
-def test_read_root():
+def test_read_root(client):
     """Test the root endpoint"""
     response = client.get("/")
     assert response.status_code == 200
     assert response.json() == {"message": "Welcome to Order Service API"}
 
-def test_get_orders():
+def test_get_orders(client):
     """Test getting all orders"""
     response = client.get("/orders")
     assert response.status_code == 200
@@ -20,7 +23,7 @@ def test_get_orders():
     assert isinstance(data, list)
     assert len(data) >= 0  # Should have at least the sample orders
     
-def test_create_order():
+def test_create_order(client):
     """Test creating a new order"""
     new_order_data = {
         "customer_id": "cust4",
@@ -49,7 +52,7 @@ def test_create_order():
     assert len(data["items"]) == 1
     assert data["items"][0]["product_name"] == "Smartphone"
     
-def test_get_specific_order():
+def test_get_specific_order(client):
     """Test getting a specific order by ID"""
     # First create an order to retrieve
     new_order_data = {
