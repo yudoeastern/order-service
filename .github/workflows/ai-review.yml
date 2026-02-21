@@ -1,0 +1,36 @@
+name: AI Code Review
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install jq
+        run: sudo apt-get install jq
+
+      - name: Read Python files
+        id: read_code
+        run: |
+          CODE=$(cat app.py | jq -Rs .)
+          echo "code=$CODE" >> $GITHUB_OUTPUT
+
+      - name: Call DeepSeek API
+        run: |
+          curl https://api.deepseek.com/chat/completions \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.DEEPSEEK_API_KEY }}" \
+            -d "{
+              \"model\": \"deepseek-chat\",
+              \"messages\": [
+                {\"role\": \"system\", \"content\": \"You are a senior DevSecOps reviewer. Review the following FastAPI code and suggest improvements.\"},
+                {\"role\": \"user\", \"content\": ${{ steps.read_code.outputs.code }}}
+              ]
+            }"
