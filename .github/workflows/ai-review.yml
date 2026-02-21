@@ -16,10 +16,12 @@ jobs:
         run: sudo apt-get install -y jq
 
       - name: Read Source Code
-        run: cat user-service/main.py > source.txt
+        run: cat main.py > source.txt
 
-      - name: Call DeepSeek API
+            - name: Call DeepSeek API
         run: |
+          CODE=$(jq -Rs . < source.txt)
+
           RESPONSE=$(curl -s https://api.deepseek.com/v1/chat/completions \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${{ secrets.DEEPSEEK_API_KEY }}" \
@@ -27,7 +29,8 @@ jobs:
               \"model\": \"deepseek-chat\",
               \"messages\": [
                 {\"role\": \"system\", \"content\": \"You are a strict DevSecOps auditor. Respond ONLY in valid JSON format.\"},
-                {\"role\": \"user\", \"content\": \"Review the following FastAPI code. Classify overall risk_level as LOW, MEDIUM, HIGH, or CRITICAL. If any CRITICAL issue exists, mark it clearly. Return JSON with keys: risk_level, issues, summary. Code: $(cat source.txt)\"}
+                {\"role\": \"user\", \"content\": \"Review the following FastAPI code. Classify overall risk_level as LOW, MEDIUM, HIGH, or CRITICAL. If any CRITICAL issue exists, mark it clearly. Return JSON with keys: risk_level, issues, summary. Code:\"},
+                {\"role\": \"user\", \"content\": $CODE}
               ]
             }")
 
