@@ -2,35 +2,51 @@ name: AI Code Review
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
 
 jobs:
   review:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v3
 
       - name: Install jq
-        run: sudo apt-get install jq
+        run: sudo apt-get install -y jq
 
-      - name: Read Python files
-        id: read_code
-        run: |
-          CODE=$(cat app.py | jq -Rs .)
-          echo "code=$CODE" >> $GITHUB_OUTPUT
+      - name: Read Source Code
+        run: cat user-service/app.py > source.txt
 
       - name: Call DeepSeek API
         run: |
-          curl https://api.deepseek.com/chat/completions \
+          RESPONSE=$(curl -s https://api.deepseek.com/v1/chat/completions \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${{ secrets.DEEPSEEK_API_KEY }}" \
             -d "{
               \"model\": \"deepseek-chat\",
               \"messages\": [
-                {\"role\": \"system\", \"content\": \"You are a senior DevSecOps reviewer. Review the following FastAPI code and suggest improvements.\"},
-                {\"role\": \"user\", \"content\": ${{ steps.read_code.outputs.code }}}
+                {\"role\": \"system\", \"content\": \"You are a strict DevSecOps auditor. Respond ONLY in valid JSON format.\"},
+                {\"role\": \"user\", \"content\": \"Review the following FastAPI code. Classify overall risk_level as LOW, MEDIUM, HIGH, or CRITICAL. If any CRITICAL issue exists, mark it clearly. Return JSON with keys: risk_level, issues, summary. Code: $(cat source.txt)\"}
               ]
-            }"
+            }")
+
+          echo "$RESPONSE" > raw.json
+          echo "Raw AI response:"
+          cat raw.json
+
+          CONTENT=$(cat raw.json | jq -r '.choices[0].message.content')
+          echo "$CONTENT" > review.json
+
+      - name: Check Risk Level
+        run: |
+          RISK=$(cat review.json | jq -r '.risk_level')
+
+          echo "Detected Risk Level: $RISK"
+
+          if [ "$RISK" = "CRITICAL" ]; then
+            echo "❌ Critical issue detected. Failing pipeline."
+            exit 1
+          else
+            echo "✅ No critical issue. Pipeline continues."
+          fi
