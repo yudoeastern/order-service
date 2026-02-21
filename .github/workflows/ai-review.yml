@@ -13,33 +13,55 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Install jq
-        run: sudo apt-get install -y jq
+        run: sudo apt-get update && sudo apt-get install -y jq
 
       - name: Read Source Code
-        run: cat main.py > source.txt
+        run: |
+          echo "Reading main.py..."
+          cat main.py > source.txt
 
-            - name: Call DeepSeek API
+      - name: Call Qwen API (Alibaba Model Studio)
         run: |
           CODE=$(jq -Rs . < source.txt)
 
-          RESPONSE=$(curl -s https://api.deepseek.com/v1/chat/completions \
+          RESPONSE=$(curl -s https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/text-generation/generation \
             -H "Content-Type: application/json" \
-            -H "Authorization: Bearer ${{ secrets.DEEPSEEK_API_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.QWEN_API_KEY }}" \
             -d "{
-              \"model\": \"deepseek-chat\",
-              \"messages\": [
-                {\"role\": \"system\", \"content\": \"You are a strict DevSecOps auditor. Respond ONLY in valid JSON format.\"},
-                {\"role\": \"user\", \"content\": \"Review the following FastAPI code. Classify overall risk_level as LOW, MEDIUM, HIGH, or CRITICAL. If any CRITICAL issue exists, mark it clearly. Return JSON with keys: risk_level, issues, summary. Code:\"},
-                {\"role\": \"user\", \"content\": $CODE}
-              ]
+              \"model\": \"qwen-plus\",
+              \"input\": {
+                \"messages\": [
+                  {
+                    \"role\": \"system\",
+                    \"content\": \"You are a strict DevSecOps auditor. Respond ONLY in valid JSON with keys: risk_level, issues, summary.\"
+                  },
+                  {
+                    \"role\": \"user\",
+                    \"content\": \"Review this FastAPI code and classify overall risk_level as LOW, MEDIUM, HIGH, or CRITICAL.\"
+                  },
+                  {
+                    \"role\": \"user\",
+                    \"content\": $CODE
+                  }
+                ]
+              }
             }")
 
           echo "$RESPONSE" > raw.json
-          echo "Raw AI response:"
+          echo "===== RAW QWEN RESPONSE ====="
           cat raw.json
 
-          CONTENT=$(cat raw.json | jq -r '.choices[0].message.content')
+          # Extract text output
+          CONTENT=$(cat raw.json | jq -r '.output.text')
+
           echo "$CONTENT" > review.json
+
+          echo "===== PARSED REVIEW.JSON ====="
+          cat review.json
+
+      - name: Validate JSON Format
+        run: |
+          cat review.json | jq .
 
       - name: Check Risk Level
         run: |
