@@ -16,7 +16,7 @@ jobs:
         run: sudo apt-get install -y jq
 
       - name: Read Source Code
-        run: cat user-service/app.py > source.txt
+        run: cat user-service/main.py > source.txt
 
       - name: Call DeepSeek API
         run: |
