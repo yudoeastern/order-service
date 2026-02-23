@@ -42,61 +42,70 @@ jobs:
       - name: Call Qwen API (DashScope International)
         id: qwen_call
         run: |
-          # Encode context ke JSON string yang aman
-          CODE_CONTEXT=$(jq -Rs . < diff_context.txt)
+          # 1. Baca diff context sebagai raw string
+          CODE_CONTEXT=$(cat diff_context.txt)
 
-          RESPONSE=$(curl -s -w "\n%{http_code}" https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/text-generation/generation \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer ${{ secrets.QWEN_API_KEY }}" \
-            -d "{
-              \"model\": \"qwen-plus\",
-              \"input\": {
-                \"messages\": [
+          # 2. Build JSON payload MENGGUNAKAN JQ (Aman dari special characters)
+          #    --arg dan --argjson memastikan semua karakter di-escape dengan benar
+          PAYLOAD=$(jq -n \
+            --arg model "qwen-plus" \
+            --arg context "$CODE_CONTEXT" \
+            --arg api_key "${{ secrets.QWEN_API_KEY }}" \
+            '{
+              "model": $model,
+              "input": {
+                "messages": [
                   {
-                    \"role\": \"system\",
-                    \"content\": \"You are a strict DevSecOps auditor. Respond ONLY in valid raw JSON (no markdown blocks) with keys: risk_level (LOW/MEDIUM/HIGH/CRITICAL), issues (array of strings), summary (string).\"
+                    "role": "system",
+                    "content": "You are a strict DevSecOps auditor. Respond ONLY in valid raw JSON (no markdown blocks) with keys: risk_level (LOW/MEDIUM/HIGH/CRITICAL), issues (array of strings), summary (string)."
                   },
                   {
-                    \"role\": \"user\",
-                    \"content\": \"Review the following git diff and classify the overall risk_level. \n\nDiff Content:\n$CODE_CONTEXT\"
+                    "role": "user",
+                    "content": "Review the following git diff and classify the overall risk_level. \n\nDiff Content:\n\($context)"
                   }
                 ]
               },
-              \"parameters\": {
-                \"result_format\": \"message\"
+              "parameters": {
+                "result_format": "message"
               }
-            }")
+            }')
+
+          # 3. Call API dengan payload yang sudah valid
+          RESPONSE=$(curl -s -w "\n%{http_code}" https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/text-generation/generation \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.QWEN_API_KEY }}" \
+            -d "$PAYLOAD")
           
-          # Pisahkan body response dan HTTP code
+          # 4. Pisahkan body response dan HTTP code
           HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
           BODY=$(echo "$RESPONSE" | sed '$d')
 
+          echo "HTTP Status: $HTTP_CODE"
+
           if [ "$HTTP_CODE" -ne 200 ]; then
             echo "❌ API Request Failed with code $HTTP_CODE"
-            echo "$BODY"
-            exit 1
-          fi
-
-          echo "$BODY" > raw_response.json
-
-          # Extract content dengan error handling
-          CONTENT=$(jq -r '.output.choices[0].message.content // empty' raw_response.json)
-          
-          if [ -z "$CONTENT" ]; then
-            echo "⚠️ Warning: Could not extract content from API response. Raw response:"
-            cat raw_response.json
-            # Lanjutkan tapi tandai sebagai unknown
-            echo '{"risk_level": "UNKNOWN", "issues": ["API parsing failed"], "summary": "Failed to parse AI response"}' > review.json
+            echo "Response Body: $BODY"
+            # Jangan exit 1 disini jika ingin workflow tetap jalan untuk posting comment error
+            echo '{"risk_level": "ERROR", "issues": ["API Request Failed"], "summary": "'"$BODY"'"}' > review.json
           else
-            # Bersihkan markdown block jika ada
-            CLEAN_CONTENT=$(echo "$CONTENT" | sed 's/```json//g' | sed 's/```//g' | jq -c . 2>/dev/null)
+            echo "$BODY" > raw_response.json
+
+            # 5. Extract content dengan error handling
+            CONTENT=$(jq -r '.output.choices[0].message.content // empty' raw_response.json)
             
-            if [ $? -ne 0 ]; then
-               echo "⚠️ Warning: Content is not valid JSON. Attempting to force parse..."
-               # Fallback: coba ambil string mentah
-               echo "{\"risk_level\": \"UNKNOWN\", \"issues\": [\"JSON parsing failed\"], \"summary\": \"$CONTENT\"}" > review.json
+            if [ -z "$CONTENT" ]; then
+              echo "⚠️ Warning: Could not extract content from API response."
+              echo '{"risk_level": "UNKNOWN", "issues": ["API parsing failed"], "summary": "Failed to parse AI response"}' > review.json
             else
-               echo "$CLEAN_CONTENT" > review.json
+              # Bersihkan markdown block jika ada, lalu validasi JSON
+              CLEAN_CONTENT=$(echo "$CONTENT" | sed 's/```json//g' | sed 's/```//g' | jq -c . 2>/dev/null)
+              
+              if [ $? -ne 0 ]; then
+                 echo "⚠️ Warning: Content is not valid JSON. Attempting fallback..."
+                 echo "{\"risk_level\": \"UNKNOWN\", \"issues\": [\"JSON parsing failed\"], \"summary\": \"$(echo "$CONTENT" | head -c 200)\"}" > review.json
+              else
+                 echo "$CLEAN_CONTENT" > review.json
+              fi
             fi
           fi
 
