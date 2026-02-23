@@ -1,4 +1,4 @@
-name: AI Code Review
+name: AI Code Review (Qwen Fixed)
 
 on:
   push:
@@ -11,7 +11,6 @@ on:
 jobs:
   review:
     runs-on: ubuntu-latest
-
     permissions:
       contents: read
       pull-requests: write
@@ -19,19 +18,34 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # Penting untuk mendapatkan diff history
 
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
+      - name: Install Dependencies
+        run: sudo apt-get update && sudo apt-get install -y jq curl
 
-      - name: Read Source Code
+      - name: Prepare Code Context (Dynamic Diff)
         run: |
-          cat main.py > source.txt
+          # Jika PR, ambil diff. Jika push biasa, ambil file yang diubah terakhir
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            git diff origin/${{ github.base_ref }}...${{ github.head_ref }} > diff_context.txt
+          else
+            git diff HEAD~1 HEAD > diff_context.txt
+          fi
+          
+          # Fallback jika tidak ada diff (misal commit pertama)
+          if [ ! -s diff_context.txt ]; then
+             echo "No changes detected or initial commit, reviewing main.py as fallback"
+             cat main.py > diff_context.txt 2>/dev/null || echo "No code to review" > diff_context.txt
+          fi
 
-      - name: Call Qwen API (Alibaba Model Studio)
+      - name: Call Qwen API (DashScope International)
+        id: qwen_call
         run: |
-          CODE=$(jq -Rs . < source.txt)
+          # Encode context ke JSON string yang aman
+          CODE_CONTEXT=$(jq -Rs . < diff_context.txt)
 
-          RESPONSE=$(curl -s https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/text-generation/generation \
+          RESPONSE=$(curl -s -w "\n%{http_code}" https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/text-generation/generation \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${{ secrets.QWEN_API_KEY }}" \
             -d "{
@@ -40,64 +54,103 @@ jobs:
                 \"messages\": [
                   {
                     \"role\": \"system\",
-                    \"content\": \"You are a strict DevSecOps auditor. Respond ONLY in valid JSON with keys: risk_level, issues, summary.\"
+                    \"content\": \"You are a strict DevSecOps auditor. Respond ONLY in valid raw JSON (no markdown blocks) with keys: risk_level (LOW/MEDIUM/HIGH/CRITICAL), issues (array of strings), summary (string).\"
                   },
                   {
                     \"role\": \"user\",
-                    \"content\": \"Review this FastAPI code and classify overall risk_level as LOW, MEDIUM, HIGH, or CRITICAL.\"
-                  },
-                  {
-                    \"role\": \"user\",
-                    \"content\": $CODE
+                    \"content\": \"Review the following git diff and classify the overall risk_level. \n\nDiff Content:\n$CODE_CONTEXT\"
                   }
                 ]
+              },
+              \"parameters\": {
+                \"result_format\": \"message\"
               }
             }")
+          
+          # Pisahkan body response dan HTTP code
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
 
-          echo "$RESPONSE" > raw.json
-          echo "===== RAW RESPONSE ====="
-          cat raw.json
+          if [ "$HTTP_CODE" -ne 200 ]; then
+            echo "❌ API Request Failed with code $HTTP_CODE"
+            echo "$BODY"
+            exit 1
+          fi
 
-          # Extract real content from Qwen
-          CONTENT=$(jq -r '.output.choices[0].message.content' raw.json)
+          echo "$BODY" > raw_response.json
 
-          echo "$CONTENT" > review_raw.txt
-
-          # Remove markdown block if exists
-          sed -i 's/```json//g' review_raw.txt
-          sed -i 's/```//g' review_raw.txt
-
-          cat review_raw.txt > review.json
-
-          echo "===== CLEANED JSON ====="
-          cat review.json
-
-      - name: Validate JSON (Non-blocking)
-        run: |
-          jq . review.json || echo "JSON format imperfect, continuing..."
+          # Extract content dengan error handling
+          CONTENT=$(jq -r '.output.choices[0].message.content // empty' raw_response.json)
+          
+          if [ -z "$CONTENT" ]; then
+            echo "⚠️ Warning: Could not extract content from API response. Raw response:"
+            cat raw_response.json
+            # Lanjutkan tapi tandai sebagai unknown
+            echo '{"risk_level": "UNKNOWN", "issues": ["API parsing failed"], "summary": "Failed to parse AI response"}' > review.json
+          else
+            # Bersihkan markdown block jika ada
+            CLEAN_CONTENT=$(echo "$CONTENT" | sed 's/```json//g' | sed 's/```//g' | jq -c . 2>/dev/null)
+            
+            if [ $? -ne 0 ]; then
+               echo "⚠️ Warning: Content is not valid JSON. Attempting to force parse..."
+               # Fallback: coba ambil string mentah
+               echo "{\"risk_level\": \"UNKNOWN\", \"issues\": [\"JSON parsing failed\"], \"summary\": \"$CONTENT\"}" > review.json
+            else
+               echo "$CLEAN_CONTENT" > review.json
+            fi
+          fi
 
       - name: Post AI Review Comment
         if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          COMMENT_BODY=$(cat review.json)
+          # Baca hasil review
+          if [ ! -f review.json ]; then
+            echo "Review file not found"
+            exit 0
+          fi
+          
+          # Format comment body
+          RISK=$(jq -r '.risk_level // "UNKNOWN"' review.json)
+          SUMMARY=$(jq -r '.summary // "No summary"' review.json)
+          ISSUES=$(jq -r '.issues[]?' review.json | sed 's/^/- /')
+          
+          COMMENT="### 🤖 AI Code Review Result
+          
+          **Risk Level:** $RISK
+          
+          **Summary:** 
+          $SUMMARY
+          
+          **Issues Found:**
+          $ISSUES
+          
+          <details>
+          <summary>View Raw JSON</summary>
+          
+          \`\`\`json
+          $(cat review.json | jq -c .)
+          \`\`\`
+          </details>"
 
+          # Perbaikan URL: Hapus spasi berlebih pada repos/
           curl -s -X POST \
             -H "Authorization: Bearer $GH_TOKEN" \ 
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
             -d "{\"body\": \"🤖**AI Code Review Result**\n\n\`\`\`json\n$COMMENT_BODY\n\`\`\`\"}" || true
 
-      - name: Check Risk Level
+      - name: Check Risk Level (Gatekeeping)
         run: |
           RISK=$(jq -r '.risk_level' review.json 2>/dev/null || echo "UNKNOWN")
-
           echo "Detected Risk Level: $RISK"
 
           if [ "$RISK" = "CRITICAL" ]; then
             echo "❌ Critical issue detected. Failing pipeline."
             exit 1
+          elif [ "$RISK" = "UNKNOWN" ]; then
+            echo "⚠️ Risk level unknown. Pipeline continues but check logs."
           else
-            echo "✅ No critical issue. Pipeline continues."
+            echo "✅ No critical issues. Pipeline continues."
           fi
