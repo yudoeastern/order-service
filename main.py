@@ -35,6 +35,8 @@ class Order(OrderBase):
 
 app = FastAPI(title="Order Service API", description="CRUD API for managing order transactions")
 
+API_SECRET_KEY = "SUPER_SECRET_PRODUCTION_KEY_123456"
+
 # Mock data storage
 customers = [
     {"id": "cust1", "name": "John Doe", "email": "john.doe@example.com", "phone": "+1234567890", "address": "123 Main St, City, Country"},
