@@ -27,7 +27,7 @@ jobs:
         run: |
           cat main.py > source.txt
 
-      - name: Call Qwen API (Alibaba Model Studio)
+      - name: Call Qwen API (DashScope)
         run: |
           CODE=$(jq -Rs . < source.txt)
 
@@ -58,12 +58,17 @@ jobs:
           echo "===== RAW RESPONSE ====="
           cat raw.json
 
-          # Extract real content from Qwen
-          CONTENT=$(jq -r '.output.choices[0].message.content' raw.json)
+          # 🔥 CORRECT extraction for DashScope
+          CONTENT=$(jq -r '.output.text // empty' raw.json)
+
+          # If empty, fallback to alternative structure
+          if [ -z "$CONTENT" ]; then
+            CONTENT=$(jq -r '.output.choices[0].message.content // empty' raw.json)
+          fi
 
           echo "$CONTENT" > review_raw.txt
 
-          # Remove markdown block if exists
+          # Remove markdown wrappers if exists
           sed -i 's/```json//g' review_raw.txt
           sed -i 's/```//g' review_raw.txt
 
@@ -74,7 +79,7 @@ jobs:
 
       - name: Validate JSON (Non-blocking)
         run: |
-          jq . review.json || echo "JSON format imperfect, continuing..."
+          jq . review.json || echo "JSON not perfect but continuing..."
 
       - name: Post AI Review Comment
         if: github.event_name == 'pull_request'
@@ -91,7 +96,7 @@ jobs:
 
       - name: Check Risk Level
         run: |
-          RISK=$(jq -r '.risk_level' review.json 2>/dev/null || echo "UNKNOWN")
+          RISK=$(jq -r '.risk_level // "UNKNOWN"' review.json)
 
           echo "Detected Risk Level: $RISK"
 
