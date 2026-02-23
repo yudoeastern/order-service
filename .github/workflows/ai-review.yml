@@ -136,10 +136,10 @@ jobs:
 
           # Perbaikan URL: Hapus spasi berlebih pada repos/
           curl -s -X POST \
-            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Authorization: Bearer $GH_TOKEN" \ 
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
-            -d "{\"body\": $(echo "$COMMENT" | jq -Rs .)}" || echo "⚠️ Failed to post comment"
+            -d "{\"body\": \"🤖**AI Code Review Result**\n\n\`\`\`json\n$COMMENT_BODY\n\`\`\`\"}" || true
 
       - name: Check Risk Level (Gatekeeping)
         run: |
