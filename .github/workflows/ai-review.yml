@@ -25,13 +25,9 @@ jobs:
 
       - name: Read Source Code
         run: |
-          if [ ! -f "main.py" ]; then
-            echo "main.py not found!"
-            exit 1
-          fi
           cat main.py > source.txt
 
-      - name: Call Qwen API (DashScope)
+      - name: Call Qwen API (Alibaba Model Studio)
         run: |
           CODE=$(jq -Rs . < source.txt)
 
@@ -62,30 +58,29 @@ jobs:
           echo "===== RAW RESPONSE ====="
           cat raw.json
 
-          # 🔥 Correct extraction for DashScope
-          CONTENT=$(jq -r '.output.text // empty' raw.json)
+          # Extract real content from Qwen
+          CONTENT=$(jq -r '.output.text // empty' raw.json 2>/dev/null || echo "")
 
-          # Fallback for other possible structure
-          if [ -z "$CONTENT" ]; then
-            CONTENT=$(jq -r '.output.choices[0].message.content // empty' raw.json)
-          fi
+          echo "$CONTENT" > review_raw.txt
 
-          # Prevent null output
+          # Remove markdown block if exists
+          sed -i 's/```json//g' review_raw.txt
+          sed -i 's/```//g' review_raw.txt
+
           if [ -z "$CONTENT" ]; then
-            echo '{"risk_level":"UNKNOWN","issues":[],"summary":"AI returned empty response"}' > review.json
+            echo '{"risk_level":"UNKNOWN","issues":[],"summary":"AI response missing or API error"}' > review.json
           else
-            echo "$CONTENT" > review_raw.txt
-            sed -i 's/```json//g' review_raw.txt
-            sed -i 's/```//g' review_raw.txt
-            cat review_raw.txt > review.json
+            echo "$CONTENT" | sed 's/```json//g' | sed 's/```//g' > review.json
           fi
 
-          echo "===== CLEANED JSON ====="
-          cat review.json
+          # cat review_raw.txt > review.json
+
+          # echo "===== CLEANED JSON ====="
+          # cat review.json
 
       - name: Validate JSON (Non-blocking)
         run: |
-          jq . review.json || echo "JSON not perfect, continuing..."
+          jq . review.json || echo "JSON format imperfect, continuing..."
 
       - name: Post AI Review Comment
         if: github.event_name == 'pull_request'
@@ -102,7 +97,7 @@ jobs:
 
       - name: Check Risk Level
         run: |
-          RISK=$(jq -r '.risk_level // "UNKNOWN"' review.json)
+          RISK=$(jq -r '.risk_level' review.json 2>/dev/null || echo "UNKNOWN")
 
           echo "Detected Risk Level: $RISK"
 
