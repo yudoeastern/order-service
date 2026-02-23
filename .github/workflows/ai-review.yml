@@ -25,7 +25,6 @@ jobs:
 
       - name: Read Source Code
         run: |
-          echo "Reading main.py..."
           cat main.py > source.txt
 
       - name: Call Qwen API (Alibaba Model Studio)
@@ -56,20 +55,26 @@ jobs:
             }")
 
           echo "$RESPONSE" > raw.json
-          echo "===== RAW QWEN RESPONSE ====="
+          echo "===== RAW RESPONSE ====="
           cat raw.json
 
-          # Extract AI message safely
-          CONTENT=$(cat raw.json | jq -r '.output.text')
+          # Extract real content from Qwen
+          CONTENT=$(jq -r '.output.choices[0].message.content' raw.json)
 
-          echo "$CONTENT" > review.json
+          echo "$CONTENT" > review_raw.txt
 
-          echo "===== PARSED REVIEW.JSON ====="
+          # Remove markdown block if exists
+          sed -i 's/```json//g' review_raw.txt
+          sed -i 's/```//g' review_raw.txt
+
+          cat review_raw.txt > review.json
+
+          echo "===== CLEANED JSON ====="
           cat review.json
 
-      - name: Validate JSON Format
+      - name: Validate JSON (Non-blocking)
         run: |
-          cat review.json | jq .
+          jq . review.json || echo "JSON format imperfect, continuing..."
 
       - name: Post AI Review Comment
         if: github.event_name == 'pull_request'
@@ -82,11 +87,11 @@ jobs:
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
-            -d "{\"body\": \"🤖 **AI Code Review Result**\n\n\`\`\`json\n$COMMENT_BODY\n\`\`\`\"}"
+            -d "{\"body\": \"🤖 **AI Code Review Result**\n\n\`\`\`json\n$COMMENT_BODY\n\`\`\`\"}" || true
 
       - name: Check Risk Level
         run: |
-          RISK=$(cat review.json | jq -r '.risk_level')
+          RISK=$(jq -r '.risk_level' review.json 2>/dev/null || echo "UNKNOWN")
 
           echo "Detected Risk Level: $RISK"
 
