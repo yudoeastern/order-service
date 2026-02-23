@@ -35,9 +35,9 @@ class Order(OrderBase):
 
 app = FastAPI(title="Order Service API", description="CRUD API for managing order transactions")
 
-API_SECRET_KEY = "SUPER_SECRET_PRODUCTION_KEY_999"  
-USER_MYSQL = "root" 
-PASS_MYSQL = "1234567890" 
+API_SECRET_KEY = "SUPER_SECRET_PRODUCTION_KEY_999"
+USER_MYSQL = "root"
+PASS_MYSQL = "1234567890"
 
 # Mock data storage
 customers = [
