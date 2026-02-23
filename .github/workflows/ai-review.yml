@@ -12,6 +12,10 @@ jobs:
   review:
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: read
+      pull-requests: write
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
@@ -55,7 +59,7 @@ jobs:
           echo "===== RAW QWEN RESPONSE ====="
           cat raw.json
 
-          # Extract text output
+          # Extract AI message safely
           CONTENT=$(cat raw.json | jq -r '.output.text')
 
           echo "$CONTENT" > review.json
@@ -66,6 +70,19 @@ jobs:
       - name: Validate JSON Format
         run: |
           cat review.json | jq .
+
+      - name: Post AI Review Comment
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          COMMENT_BODY=$(cat review.json)
+
+          curl -s -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
+            -d "{\"body\": \"🤖 **AI Code Review Result**\n\n\`\`\`json\n$COMMENT_BODY\n\`\`\`\"}"
 
       - name: Check Risk Level
         run: |

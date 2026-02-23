@@ -43,7 +43,7 @@ customers = [
 ]
 
 products = [
-    {"id": "prod1", "name": "Laptop", "category": "Electronics", "price": 1200.00}
+    {"id": "prod1", "name": "Laptop", "category": "Electronics", "price": 1200.00},
     {"id": "prod2", "name": "Mouse", "category": "Electronics", "price": 25.00},
     {"id": "prod3", "name": "Keyboard", "category": "Electronics", "price": 80.00},
     {"id": "prod4", "name": "Monitor", "category": "Electronics", "price": 300.00},
