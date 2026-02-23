@@ -100,4 +100,4 @@ jobs:
             exit 1
           else
             echo "✅ No critical issue. Pipeline continues."
-          fi
+          fi 
