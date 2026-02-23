@@ -37,7 +37,7 @@ app = FastAPI(title="Order Service API", description="CRUD API for managing orde
 
 API_SECRET_KEY = "SUPER_SECRET_PRODUCTION_KEY_999"
 USER_MYSQL = "root"
-PASS_MYSQL = "1234567890"
+PASS_MYSQL = "1234567890" 
 
 # Mock data storage
 customers = [
