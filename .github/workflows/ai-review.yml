@@ -59,7 +59,7 @@ jobs:
           cat raw.json
 
           # Extract real content from Qwen
-          CONTENT=$(jq -r '.output.text // empty' raw.json 2>/dev/null || echo "")
+          CONTENT=$(jq -r '.output.choices[0].message.content' raw.json)
 
           echo "$CONTENT" > review_raw.txt
 
@@ -67,16 +67,10 @@ jobs:
           sed -i 's/```json//g' review_raw.txt
           sed -i 's/```//g' review_raw.txt
 
-          if [ -z "$CONTENT" ]; then
-            echo '{"risk_level":"UNKNOWN","issues":[],"summary":"AI response missing or API error"}' > review.json
-          else
-            echo "$CONTENT" | sed 's/```json//g' | sed 's/```//g' > review.json
-          fi
+          cat review_raw.txt > review.json
 
-          # cat review_raw.txt > review.json
-
-          # echo "===== CLEANED JSON ====="
-          # cat review.json
+          echo "===== CLEANED JSON ====="
+          cat review.json
 
       - name: Validate JSON (Non-blocking)
         run: |
