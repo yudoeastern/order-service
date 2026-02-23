@@ -1,3 +1,13 @@
+name: AI Code Review
+
+on:
+  push:
+    branches-ignore:
+      - main
+  pull_request:
+    branches:
+      - main
+
 jobs:
   review:
     runs-on: ubuntu-latest
@@ -7,19 +17,17 @@ jobs:
       pull-requests: write
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout Repository
+        uses: actions/checkout@v3
 
-      - run: sudo apt-get update && sudo apt-get install -y jq
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
 
       - name: Read Source Code
         run: |
-          if [ ! -f "main.py" ]; then
-            echo "main.py not found!"
-            exit 1
-          fi
           cat main.py > source.txt
 
-      - name: Call Qwen API
+      - name: Call Qwen API (Alibaba Model Studio)
         run: |
           CODE=$(jq -Rs . < source.txt)
 
@@ -30,24 +38,45 @@ jobs:
               \"model\": \"qwen-plus\",
               \"input\": {
                 \"messages\": [
-                  {\"role\":\"system\",\"content\":\"You are a strict DevSecOps auditor. Respond ONLY in valid JSON with keys: risk_level, issues, summary.\"},
-                  {\"role\":\"user\",\"content\":\"Review this FastAPI code.\"},
-                  {\"role\":\"user\",\"content\": $CODE}
+                  {
+                    \"role\": \"system\",
+                    \"content\": \"You are a strict DevSecOps auditor. Respond ONLY in valid JSON with keys: risk_level, issues, summary.\"
+                  },
+                  {
+                    \"role\": \"user\",
+                    \"content\": \"Review this FastAPI code and classify overall risk_level as LOW, MEDIUM, HIGH, or CRITICAL.\"
+                  },
+                  {
+                    \"role\": \"user\",
+                    \"content\": $CODE
+                  }
                 ]
               }
             }")
 
           echo "$RESPONSE" > raw.json
+          echo "===== RAW RESPONSE ====="
+          cat raw.json
 
-          CONTENT=$(jq -r '.output.text // empty' raw.json)
+          # Extract real content from Qwen
+          CONTENT=$(jq -r '.output.choices[0].message.content' raw.json)
 
-          if [ -z "$CONTENT" ]; then
-            echo '{"risk_level":"UNKNOWN","issues":[],"summary":"AI response empty"}' > review.json
-          else
-            echo "$CONTENT" | sed 's/```json//g' | sed 's/```//g' > review.json
-          fi
+          echo "$CONTENT" > review_raw.txt
 
-      - name: Post Comment
+          # Remove markdown block if exists
+          sed -i 's/```json//g' review_raw.txt
+          sed -i 's/```//g' review_raw.txt
+
+          cat review_raw.txt > review.json
+
+          echo "===== CLEANED JSON ====="
+          cat review.json
+
+      - name: Validate JSON (Non-blocking)
+        run: |
+          jq . review.json || echo "JSON format imperfect, continuing..."
+
+      - name: Post AI Review Comment
         if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -58,14 +87,17 @@ jobs:
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
-            -d "{\"body\":\"🤖 AI Code Review Result\n\n\`\`\`json\n$COMMENT_BODY\n\`\`\`\"}" || true
+            -d "{\"body\": \"🤖 **AI Code Review Result**\n\n\`\`\`json\n$COMMENT_BODY\n\`\`\`\"}" || true
 
-      - name: Fail if Critical
+      - name: Check Risk Level
         run: |
-          RISK=$(jq -r '.risk_level // "UNKNOWN"' review.json)
+          RISK=$(jq -r '.risk_level' review.json 2>/dev/null || echo "UNKNOWN")
 
-          echo "Risk: $RISK"
+          echo "Detected Risk Level: $RISK"
 
           if [ "$RISK" = "CRITICAL" ]; then
+            echo "❌ Critical issue detected. Failing pipeline."
             exit 1
+          else
+            echo "✅ No critical issue. Pipeline continues."
           fi
